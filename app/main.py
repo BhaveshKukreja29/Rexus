@@ -6,15 +6,6 @@ app = FastAPI()
 
 MAX_REQUEST_SIZE = 10 * 1024 * 1024
 
-# headers that should not be directly proxied from the target server to the client.
-# these are "hop-by-hop" headers that are managed by the connection.
-HOP_BY_HOP_HEADERS = [
-    "content-encoding",
-    "content-length",
-    "transfer-encoding",
-    "connection",
-]
-
 def get_target_url(api_name: str) -> str:
     target_url = API_TARGETS.get(api_name)
     if not target_url:
@@ -54,6 +45,8 @@ async def proxy_request(api_name: str, path: str, request: Request):
         response_headers.pop("content-length", None)
         response_headers.pop("transfer-encoding", None)
         response_headers.pop("connection", None)
+
+        print(f"Proxying request: {request.method} {target_url} - Status: {response.status_code}")
 
         return Response(
             content=response.content, 
