@@ -2,12 +2,9 @@ import redis.asyncio as redis
 import time
 import uuid
 from fastapi import HTTPException
-from .config import REDIS_URL
+from .config import REDIS_URL, MAX_REQUESTS_PER_MINUTE, WINDOW_SECONDS
 
 redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-
-MAX_REQUESTS_PER_MINUTE = 100
-WINDOW_SECONDS = 60
 
 # This rate limiter uses the Sliding Window algorithm implemented with a Redis Sorted Set.
 #
@@ -45,4 +42,6 @@ async def rate_limit(user_id: str):
 
     if current_requests > MAX_REQUESTS_PER_MINUTE:
         raise HTTPException(status_code=429, detail="Too many requests")
+    
+    return current_requests, now
 

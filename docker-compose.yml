@@ -7,8 +7,14 @@ services:
       - ./app:/app/app
     depends_on:
       - redis
+      - mock_server
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+  mock_server:
+    build: .
+    command: ["uvicorn", "mock_server:app", "--host", "0.0.0.0", "--port", "8001"]
+    volumes:
+      - .:/app

@@ -1,11 +1,11 @@
 from fastapi import FastAPI, Request, HTTPException, status, Response
-from httpx import AsyncClient
-from .config import API_TARGETS
+from httpx import AsyncClient, ConnectError, ReadTimeout
+from .config import API_TARGETS, MAX_REQUESTS_PER_MINUTE, WINDOW_SECONDS, MAX_REQUEST_SIZE
 from .rate_limit import rate_limit
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s') 
 
 app = FastAPI()
-
-MAX_REQUEST_SIZE = 10 * 1024 * 1024
 
 def get_target_url(api_name: str) -> str:
     target_url = API_TARGETS.get(api_name)
@@ -16,7 +16,7 @@ def get_target_url(api_name: str) -> str:
 
 @app.api_route('/proxy/{api_name}/{path:path}', methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_request(api_name: str, path: str, request: Request):
-    await rate_limit(user_id="test-user")
+    current_requests, timestamp = await rate_limit(user_id="test-user")
     
     body = await request.body()
     request_size = len(body)
@@ -34,12 +34,19 @@ async def proxy_request(api_name: str, path: str, request: Request):
         base_url = get_target_url(api_name)  
         target_url = f"{base_url}/{path}"
 
-        response = await client.request(
-            method=request.method, 
-            url=target_url, 
-            headers=request_headers, 
-            content=body
-        )
+        try:
+            response = await client.request(
+                method=request.method, 
+                url=target_url, 
+                headers=request_headers, 
+                params=request.query_params,
+                content=body
+            )
+        except (ConnectError, ReadTimeout):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="The upstream API is unavailable."
+            )
 
         # remove hop-by-hop headers from the target's response
         # this allows our server to generate correct headers for the client
@@ -49,11 +56,22 @@ async def proxy_request(api_name: str, path: str, request: Request):
         response_headers.pop("transfer-encoding", None)
         response_headers.pop("connection", None)
 
-        print(f"Proxying request: {request.method} {target_url} - Status: {response.status_code}")
+
+        # I learned that X means experimental header, which are different from the standard ones
+        # Although it was depreceated in 2012, it's still widely used
+        response_headers.pop("x-ratelimit-limit", None)
+        response_headers.pop("x-ratelimit-remaining", None)
+        response_headers.pop("x-ratelimit-reset", None)
+
+        response_headers["X-RateLimit-Limit"] = str(MAX_REQUESTS_PER_MINUTE)
+        response_headers["X-RateLimit-Remaining"] = str(MAX_REQUESTS_PER_MINUTE - current_requests)
+        response_headers["X-RateLimit-Reset"] = str(timestamp + WINDOW_SECONDS)
+
+        logging.info(f"Proxying request: {request.method} {target_url} - Status: {response.status_code}")
 
         return Response(
             content=response.content, 
             status_code=response.status_code, 
             headers=response_headers
         )
-
+    
