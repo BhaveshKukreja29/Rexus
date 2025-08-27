@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, status, Response
 from httpx import AsyncClient
 from .config import API_TARGETS
+from .rate_limit import rate_limit
 
 app = FastAPI()
 
@@ -15,6 +16,8 @@ def get_target_url(api_name: str) -> str:
 
 @app.api_route('/proxy/{api_name}/{path:path}', methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_request(api_name: str, path: str, request: Request):
+    await rate_limit(user_id="test-user")
+    
     body = await request.body()
     request_size = len(body)
 
