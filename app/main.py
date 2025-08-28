@@ -2,8 +2,10 @@ from fastapi import FastAPI, Request, HTTPException, status, Response
 from httpx import AsyncClient, ConnectError, ReadTimeout
 from .config import API_TARGETS, MAX_REQUESTS_PER_MINUTE, WINDOW_SECONDS, MAX_REQUEST_SIZE
 from .rate_limit import rate_limit
+from .cache import get_cached_response, set_cached_response
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s') 
+import json
 
 app = FastAPI()
 
@@ -23,6 +25,21 @@ async def proxy_request(api_name: str, path: str, request: Request):
 
     if request_size > MAX_REQUEST_SIZE:
         raise HTTPException(status_code=413, detail="Payload Too Large")
+    
+    # check for cached values
+    if request.method == "GET":
+        query_parameters = dict(request.query_params)
+        serialized_query_parametes = json.dumps(query_parameters, sort_keys=True)
+        cache_key = f"cache:{api_name}:{path}:{serialized_query_parametes}"
+
+        cached_response = await get_cached_response(cache_key)
+        if cached_response is not None:
+            return Response(
+                content=json.dumps(cached_response["content"]),
+                status_code=cached_response["status_code"], 
+                headers=cached_response["headers"]
+            )
+
 
     async with AsyncClient() as client:
         # remove the client's 'host' header, as it's specific to the incoming connection
@@ -68,6 +85,14 @@ async def proxy_request(api_name: str, path: str, request: Request):
         response_headers["X-RateLimit-Reset"] = str(timestamp + WINDOW_SECONDS)
 
         logging.info(f"Proxying request: {request.method} {target_url} - Status: {response.status_code}")
+
+        if request.method == "GET" and response.status_code == 200:
+            response_dict = {
+                "content": response.json(), 
+                "status_code": response.status_code, 
+                "headers": dict(response_headers)
+            }
+            await set_cached_response(cache_key, response_dict)
 
         return Response(
             content=response.content, 
