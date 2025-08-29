@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import APIKey
-from databse import get_db
+from app.database import get_db
 
 def hash_secret(secret: str) -> str:
     salt = bcrypt.gensalt()

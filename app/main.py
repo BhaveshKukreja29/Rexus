@@ -6,13 +6,13 @@ from .cache import get_cached_response, set_cached_response
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s') 
 import json
-import auth
+from .auth import router
 from .security import authenticate_api_key
 from .models import APIKey
 
 app = FastAPI()
 
-app.include_router(auth.router)
+app.include_router(router)
 
 def get_target_url(api_name: str) -> str:
     target_url = API_TARGETS.get(api_name)

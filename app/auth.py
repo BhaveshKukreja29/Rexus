@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .databse import get_db
+from .database import get_db
 from .security import create_api_key
 
 from pydantic import BaseModel
