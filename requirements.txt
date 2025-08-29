@@ -8,3 +8,4 @@ bcrypt
 alembic
 python-dotenv
 greenlet
+celery

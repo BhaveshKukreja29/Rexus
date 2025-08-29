@@ -9,6 +9,8 @@ import json
 from .auth import router
 from .security import authenticate_api_key
 from .models import APIKey
+from .tasks import log_request_task
+import time
 
 app = FastAPI()
 
@@ -66,6 +68,7 @@ async def proxy_request(
         target_url = f"{base_url}/{path}"
 
         try:
+            start_time = time.time()
             response = await client.request(
                 method=request.method, 
                 url=target_url, 
@@ -73,11 +76,24 @@ async def proxy_request(
                 params=request.query_params,
                 content=body
             )
+            end_time = time.time() 
+            latency = int((end_time - start_time) * 1000)
         except (ConnectError, ReadTimeout):
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="The upstream API is unavailable."
             )
+
+        # .delay() sends this task to the Redis queue instead of running it here.
+        # This is non-blocking (fire and forget). It returns an AsyncResult object,
+        # but we don't need it, so we're just letting it go lol.
+        log_request_task.delay(
+            api_key_id=str(api_key.id),
+            method=request.method,
+            path=path,
+            status_code=response.status_code,
+            latency_ms=latency
+        )
 
         # remove hop-by-hop headers from the target's response
         # this allows our server to generate correct headers for the client
