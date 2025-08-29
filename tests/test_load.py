@@ -1,32 +1,52 @@
 import httpx
 import asyncio
 import time
+from asyncio import Semaphore
 from app.config import MAX_REQUESTS_PER_MINUTE, WINDOW_SECONDS
 
 # Define the target URL for your running proxy
 PROXY_URL = "http://localhost:8000/proxy/mock_github/users/google"
 
+CONCURRENCY_LIMIT = 30
+semaphore = Semaphore(CONCURRENCY_LIMIT)
+
 TOTAL_REQUESTS =  MAX_REQUESTS_PER_MINUTE + 20
 EXPECTED_SUCCESS = MAX_REQUESTS_PER_MINUTE
 EXPECTED_BLOCKED = 20
 
-async def make_request(client, i):
-    try:
-        response = await client.get(PROXY_URL)
-        print(f"Request {i+1}: Status {response.status_code}, Remaining: {response.headers.get('X-RateLimit-Remaining')}")
-        return response.status_code, response.headers
-    except httpx.ReadTimeout:
-        print(f"Request {i+1}: Timed out")
-        return "Timeout", None
+AUTH_URL = "http://localhost:8000/auth/keys"
+valid_api_key = None
+
+async def setup_api_key():
+    """Fetches a new API key to be used by all tests."""
+    global valid_api_key
+    async with httpx.AsyncClient() as client:
+        response = await client.post(AUTH_URL, json={"user_id": "test-cache-user"})
+        assert response.status_code == 201
+        valid_api_key = response.json()["api_key"]
+    print(f"--- API Key for testing obtained: {valid_api_key[:10]}... ---")
+
+async def make_request(client, i, semaphore):
+    async with semaphore:
+        try:
+            headers = {"Authorization": f"Bearer {valid_api_key}"}
+            response = await client.get(PROXY_URL, headers=headers)
+            print(f"Request {i+1}: Status {response.status_code}, Remaining: {response.headers.get('X-RateLimit-Remaining')}")
+            return response.status_code, response.headers
+        except httpx.ReadTimeout:
+            print(f"Request {i+1}: Timed out")
+            return "Timeout", None
 
 
 async def main():
     success_count = 0
     blocked_count = 0
 
+    await setup_api_key()
+
     async with httpx.AsyncClient(timeout=10.0) as client:
         # Create a list of tasks to run in parallel
-        tasks = [make_request(client, i) for i in range(TOTAL_REQUESTS)]
+        tasks = [make_request(client, i, semaphore) for i in range(TOTAL_REQUESTS)]
         
         results = await asyncio.gather(*tasks)
 
@@ -66,7 +86,8 @@ async def test_window_reset():
 
     print("Sending one more request post-reset...")
     async with httpx.AsyncClient() as client:
-        response = await client.get(PROXY_URL)
+        headers = {"Authorization": f"Bearer {valid_api_key}"}
+        response = await client.get(PROXY_URL, headers=headers)
         
     print(f"Final request status: {response.status_code}")
     assert response.status_code == 200
