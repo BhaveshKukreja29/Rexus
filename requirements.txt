@@ -2,3 +2,9 @@ fastapi
 uvicorn[standard]
 httpx
 redis
+sqlalchemy[asyncio]
+asyncpg
+bcrypt
+alembic
+python-dotenv
+greenlet

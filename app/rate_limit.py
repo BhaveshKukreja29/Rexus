@@ -17,7 +17,7 @@ redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 # add the new request (ZADD), count the current requests (ZCARD), and set an expiry for
 # garbage collection. 
 
-async def rate_limit(user_id: str):
+async def rate_limit(user_id: str, limit: int):
     now = int(time.time())
 
     redis_key = f"rate_limit:{user_id}"
@@ -40,7 +40,7 @@ async def rate_limit(user_id: str):
     # index 2 cuz the third command is what actually counts the requests in window
     current_requests = results[2]
 
-    if current_requests > MAX_REQUESTS_PER_MINUTE:
+    if current_requests > limit:
         raise HTTPException(status_code=429, detail="Too many requests")
     
     return current_requests, now

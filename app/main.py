@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException, status, Response
+from fastapi import FastAPI, Request, HTTPException, status, Response, Depends
 from httpx import AsyncClient, ConnectError, ReadTimeout
 from .config import API_TARGETS, MAX_REQUESTS_PER_MINUTE, WINDOW_SECONDS, MAX_REQUEST_SIZE
 from .rate_limit import rate_limit
@@ -6,8 +6,13 @@ from .cache import get_cached_response, set_cached_response
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s') 
 import json
+import auth
+from .security import authenticate_api_key
+from .models import APIKey
 
 app = FastAPI()
+
+app.include_router(auth.router)
 
 def get_target_url(api_name: str) -> str:
     target_url = API_TARGETS.get(api_name)
@@ -17,8 +22,17 @@ def get_target_url(api_name: str) -> str:
 
 
 @app.api_route('/proxy/{api_name}/{path:path}', methods=["GET", "POST", "PUT", "DELETE"])
-async def proxy_request(api_name: str, path: str, request: Request):
-    current_requests, timestamp = await rate_limit(user_id="test-user")
+async def proxy_request(
+    api_name: str, 
+    path: str, 
+    request: Request,
+    api_key: APIKey = Depends(authenticate_api_key)
+):
+    current_requests, timestamp = await rate_limit(
+        key_id=api_key.public_id, 
+        limit=api_key.requests_per_minute_limit
+    )
+
     
     body = await request.body()
     request_size = len(body)
@@ -80,8 +94,8 @@ async def proxy_request(api_name: str, path: str, request: Request):
         response_headers.pop("x-ratelimit-remaining", None)
         response_headers.pop("x-ratelimit-reset", None)
 
-        response_headers["X-RateLimit-Limit"] = str(MAX_REQUESTS_PER_MINUTE)
-        response_headers["X-RateLimit-Remaining"] = str(MAX_REQUESTS_PER_MINUTE - current_requests)
+        response_headers["X-RateLimit-Limit"] = str(api_key.requests_per_minute_limit)
+        response_headers["X-RateLimit-Remaining"] = str(api_key.requests_per_minute_limit - current_requests)
         response_headers["X-RateLimit-Reset"] = str(timestamp + WINDOW_SECONDS)
 
         logging.info(f"Proxying request: {request.method} {target_url} - Status: {response.status_code}")
