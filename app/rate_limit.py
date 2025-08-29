@@ -17,10 +17,10 @@ redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 # add the new request (ZADD), count the current requests (ZCARD), and set an expiry for
 # garbage collection. 
 
-async def rate_limit(user_id: str, limit: int):
+async def rate_limit(key_id: str, limit: int):
     now = int(time.time())
 
-    redis_key = f"rate_limit:{user_id}"
+    redis_key = f"rate_limit:{key_id}"
 
     time_window = now - WINDOW_SECONDS
 
