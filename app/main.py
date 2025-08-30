@@ -10,11 +10,15 @@ from .auth import router
 from .security import authenticate_api_key
 from .models import APIKey
 from .tasks import log_request_task
+from .analytics import router as analytics_router
+from .websocket import router as websocket_router, manager as websocket_manager
 import time
 
 app = FastAPI()
 
 app.include_router(router)
+app.include_router(analytics_router)
+app.include_router(websocket_router)
 
 def get_target_url(api_name: str) -> str:
     target_url = API_TARGETS.get(api_name)
@@ -83,17 +87,24 @@ async def proxy_request(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="The upstream API is unavailable."
             )
+        
+        log_data = {
+            "api_key_id": str(api_key.id),
+            "method": request.method,
+            "path": path,
+            "status_code": response.status_code,
+            "latency_ms": latency
+        }
+
+        # for the frontend stuff
+        await websocket_manager.broadcast(log_data)
 
         # .delay() sends this task to the Redis queue instead of running it here.
         # This is non-blocking (fire and forget). It returns an AsyncResult object,
         # but we don't need it, so we're just letting it go lol.
-        log_request_task.delay(
-            api_key_id=str(api_key.id),
-            method=request.method,
-            path=path,
-            status_code=response.status_code,
-            latency_ms=latency
-        )
+        # Also the "**" in "**log_data" mean dictionary unpacking, I learned about it from google
+        # it's used to merge dictionaries and here it assigns keys to corresponding parameters
+        log_request_task.delay(**log_data)
 
         # remove hop-by-hop headers from the target's response
         # this allows our server to generate correct headers for the client
