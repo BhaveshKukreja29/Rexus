@@ -2,15 +2,30 @@ from fastapi import FastAPI, Request, HTTPException, status, Response, Depends
 from httpx import AsyncClient, ConnectError, ReadTimeout
 from .config import API_TARGETS, MAX_REQUESTS_PER_MINUTE, WINDOW_SECONDS, MAX_REQUEST_SIZE
 from .rate_limit import rate_limit
-from .cache import get_cached_response, set_cached_response
+from .cache import get_cached_response, set_cached_response, redis_client
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s') 
 import json
 from .auth import router
 from .security import authenticate_api_key
 from .models import APIKey
+from datetime import datetime, timezone
+from contextlib import asynccontextmanager
+import asyncio
+from .logging_worker import batch_log_writer
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    log_task = asyncio.create_task(batch_log_writer())
+    yield
+    log_task.cancel()
+    try:
+        await log_task
+    except asyncio.CancelledError:
+        logging.info("Log writer task cancelled.")
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.include_router(router)
 
@@ -78,6 +93,16 @@ async def proxy_request(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="The upstream API is unavailable."
             )
+        
+        log_entry = {
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "http_method": request.method,
+            "request_path": path,
+            "status_code": response.status_code,
+            "user_id": api_key.user_id,
+        }
+        await redis_client.lpush("api_log_buffer", json.dumps(log_entry))
+
 
         # remove hop-by-hop headers from the target's response
         # this allows our server to generate correct headers for the client
