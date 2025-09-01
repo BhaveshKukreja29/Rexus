@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, HTTPException, status, Response, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from httpx import AsyncClient, ConnectError, ReadTimeout
 from .config import API_TARGETS, MAX_REQUESTS_PER_MINUTE, WINDOW_SECONDS, MAX_REQUEST_SIZE
 from .rate_limit import rate_limit
@@ -13,6 +14,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 import asyncio
 from .logging_worker import batch_log_writer
+from .analytics import router as analytics_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,6 +30,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 app.include_router(router)
+app.include_router(analytics_router)
+
+origins = [
+    "http://localhost:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,       # Allows specific origins
+    allow_credentials=True,      # Allows cookies to be included
+    allow_methods=["*"],         # Allows all methods (GET, POST, etc.)
+    allow_headers=["*"],         # Allows all headers
+)
 
 def get_target_url(api_name: str) -> str:
     target_url = API_TARGETS.get(api_name)
