@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import './App.css';
 
 const API_URL = 'http://localhost:8000/analytics';
+const WS_URL = 'ws://localhost:8000/ws/logs';
 
 const COLORS = { success: '#28a745', clientError: '#ffc107', serverError: '#dc3545' };
 
@@ -29,10 +30,62 @@ function App() {
     };
 
     fetchData();
-    // Optional: Poll for new data every 30 seconds
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!data) return;
+
+    const ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+    };
+
+    ws.onmessage = (event) => {
+      const newLog = JSON.parse(event.data);
+      
+      setData(currentData => {
+        const updatedData = JSON.parse(JSON.stringify(currentData));
+        
+        updatedData.total_requests += 1;
+        if (newLog.status_code < 400) {
+          updatedData.successful_requests += 1;
+        } else {
+          updatedData.total_errors += 1;
+        }
+
+        if (newLog.status_code >= 500) {
+          updatedData.status_code_counts['5xx'] += 1;
+        } else if (newLog.status_code >= 400) {
+          updatedData.status_code_counts['4xx'] += 1;
+        } else {
+          updatedData.status_code_counts['2xx'] += 1;
+        }
+
+        if (newLog.status_code >= 400) {
+          const newError = {
+            id: newLog.timestamp_utc, // Use timestamp for a unique key
+            ...newLog
+          };
+          updatedData.recent_errors.unshift(newError);
+          if (updatedData.recent_errors.length > 10) {
+            updatedData.recent_errors.pop();
+          }
+        }
+        
+        return updatedData;
+      });
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
+
+    return () => {
+      ws.close();
+    };
+
+  }, [data]);
 
   if (loading && !data) return <div className="loading">Loading Dashboard...</div>;
   if (error) return <div className="error">Error loading data: {error}</div>;
@@ -49,8 +102,8 @@ function App() {
   return (
     <div className="dashboard">
       <header className="dashboard-header">
-        <h1>Rexus API Fortress</h1>
-        <p>Real-time Analytics Dashboard</p>
+        <h1>Rexus</h1>
+        <p>Analytics Dashboard</p>
       </header>
 
       <div className="kpi-grid">
