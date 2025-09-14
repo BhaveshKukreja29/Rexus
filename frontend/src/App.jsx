@@ -33,8 +33,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!data) return;
-
     const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
@@ -45,6 +43,8 @@ function App() {
       const newLog = JSON.parse(event.data);
       
       setData(currentData => {
+        if (!currentData) return null;
+
         const updatedData = JSON.parse(JSON.stringify(currentData));
         
         updatedData.total_requests += 1;
@@ -64,7 +64,7 @@ function App() {
 
         if (newLog.status_code >= 400) {
           const newError = {
-            id: newLog.timestamp_utc, // Use timestamp for a unique key
+            id: newLog.timestamp_utc,
             ...newLog
           };
           updatedData.recent_errors.unshift(newError);
@@ -85,8 +85,7 @@ function App() {
       ws.close();
     };
 
-  }, [data]);
-
+  }, []); 
   if (loading && !data) return <div className="loading">Loading Dashboard...</div>;
   if (error) return <div className="error">Error loading data: {error}</div>;
   if (!data) return <div className="loading">No data available.</div>;
@@ -138,7 +137,7 @@ function App() {
 
         <div className="chart-container small">
           <h3>Status Codes</h3>
-           <ResponsiveContainer width="100%" height={300}>
+           <ResponsiveContainer width="100%" height={280}>
             <PieChart>
               <Pie data={statusPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
                 <Cell key="success" fill={COLORS.success} />
@@ -155,10 +154,11 @@ function App() {
       <div className="table-grid">
         <div className="table-container">
           <h3>Top Endpoints</h3>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <h5>Path</h5>
+            <h5>Requests</h5>
+          </div>
           <table>
-            <thead>
-              <tr><th>Path</th><th>Requests</th></tr>
-            </thead>
             <tbody>
               {data.top_endpoints.map(ep => (
                 <tr key={ep.request_path}><td>{ep.request_path}</td><td>{ep.count.toLocaleString()}</td></tr>
@@ -168,10 +168,11 @@ function App() {
         </div>
         <div className="table-container">
           <h3>Top Users</h3>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <h5>User ID</h5>
+            <h5>Requests</h5>
+          </div>
           <table>
-            <thead>
-              <tr><th>User ID</th><th>Requests</th></tr>
-            </thead>
             <tbody>
               {data.top_users.map(user => (
                 <tr key={user.user_id}><td>{user.user_id}</td><td>{user.count.toLocaleString()}</td></tr>
@@ -181,10 +182,12 @@ function App() {
         </div>
         <div className="table-container">
           <h3>Recent Errors</h3>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <h5>Timestamp</h5>
+            <h5>Path</h5>
+            <h5>Status</h5>
+          </div>
           <table>
-            <thead>
-              <tr><th>Timestamp</th><th>Path</th><th>Status</th></tr>
-            </thead>
             <tbody>
               {data.recent_errors.map(err => (
                 <tr key={err.id}>
