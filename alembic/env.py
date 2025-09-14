@@ -18,9 +18,10 @@ from dotenv import load_dotenv
 import os
 load_dotenv()
 
+DB_HOST = os.getenv("DB_HOST", "localhost")
 config.set_main_option(
     "sqlalchemy.url",
-    f"postgresql+asyncpg://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/{os.getenv('POSTGRES_DB')}"
+    f"postgresql+asyncpg://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{DB_HOST}:5432/{os.getenv('POSTGRES_DB')}"
 )
 
 # Interpret the config file for Python logging.
