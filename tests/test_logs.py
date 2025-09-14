@@ -41,7 +41,6 @@ async def generate_log(client: httpx.AsyncClient, i: int):
 async def main():
     print("--- Starting Log Generation ---")
     
-    # 1. Get an API key
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(AUTH_URL, json={"user_id": USER_ID})
@@ -52,11 +51,12 @@ async def main():
             print(f"FATAL: Could not create API key. Is the server running? Error: {e}")
             return
 
-    # 2. Generate logs in parallel
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(headers=headers, timeout=20.0) as client:
-        tasks = [generate_log(client, i) for i in range(NUM_REQUESTS)]
-        await asyncio.gather(*tasks)
+        print("--- Sending requests sequentially to generate logs ---")
+        for i in range(NUM_REQUESTS):
+            await asyncio.sleep(0.2) 
+            await generate_log(client, i)
 
     print("\n--- Log Generation Complete ---")
     print(f"{NUM_REQUESTS} log entries have been sent to the buffer.")
