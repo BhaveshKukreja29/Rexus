@@ -137,7 +137,7 @@ function App() {
 
         <div className="chart-container small">
           <h3>Status Codes</h3>
-           <ResponsiveContainer width="100%" height={280}>
+           <ResponsiveContainer width="110%" height={300}>
             <PieChart>
               <Pie data={statusPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
                 <Cell key="success" fill={COLORS.success} />

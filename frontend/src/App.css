@@ -296,7 +296,6 @@ tbody tr:last-child td {
   display: inline-block;
 }
 
-/* Responsive Design */
 @media (max-width: 1200px) {
   .main-content {
     grid-template-columns: 1fr;
@@ -346,7 +345,6 @@ tbody tr:last-child td {
   }
 }
 
-/* Custom scrollbar for webkit browsers */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--primary-color) transparent;
@@ -370,7 +368,6 @@ tbody tr:last-child td {
   background: var(--primary-light);
 }
 
-/* Animation for elements entering view */
 @keyframes fadeInUp {
   from {
     opacity: 0;
