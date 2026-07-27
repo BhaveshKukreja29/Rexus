@@ -1,5 +1,5 @@
 import secrets
-import bcrypt
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Tuple
 
@@ -11,11 +11,16 @@ from .models import APIKey
 from app.database import get_db
 
 def hash_secret(secret: str) -> str:
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(secret.encode('utf-8'), salt).decode('utf-8')
+    # salt = bcrypt.gensalt()
+    # return bcrypt.hashpw(secret.encode('utf-8'), salt).decode('utf-8')
+    return hashlib.sha256(secret.encode('utf-8')).hexdigest()    
 
 def verify_secret(plain_secret: str, hashed_secret: str) -> bool:
-    return bcrypt.checkpw(plain_secret.encode('utf-8'), hashed_secret.encode('utf-8'))
+    new_hash = hashlib.sha256(plain_secret.encode('utf-8')).hexdigest()
+    
+    if new_hash == hashed_secret:
+        return True
+    return False
 
 
 def generate_api_key() -> Tuple[str, str, str]:
