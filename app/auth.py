@@ -3,14 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import get_db
 from .security import create_api_key
-
-from pydantic import BaseModel
-
-class APIKeyCreateRequest(BaseModel):
-    user_id: str
-
-class APIKeyCreateResponse(BaseModel):
-    api_key: str
+from .schemas import APIKeyCreateRequest, APIKeyCreateResponse
 
 router = APIRouter(
     prefix="/auth", 

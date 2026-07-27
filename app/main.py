@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 import json
 from .auth import router
 from .security import authenticate_api_key
-from .models import APIKey
+from .schemas import AuthenticatedAPIKey
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 import asyncio
@@ -81,7 +81,7 @@ async def proxy_request(
     api_name: str, 
     path: str, 
     request: Request,
-    api_key: APIKey = Depends(authenticate_api_key)
+    api_key: AuthenticatedAPIKey = Depends(authenticate_api_key),
     client: AsyncClient = Depends(get_http)
 ): 
     try:
