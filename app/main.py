@@ -1,9 +1,9 @@
 from fastapi import FastAPI, Request, HTTPException, status, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import AsyncClient, ConnectError, ReadTimeout
-from .config import API_TARGETS, MAX_REQUESTS_PER_MINUTE, WINDOW_SECONDS, MAX_REQUEST_SIZE
+from .config import API_TARGETS, WINDOW_SECONDS, MAX_REQUEST_SIZE, redis_client
 from .rate_limit import rate_limit
-from .cache import get_cached_response, set_cached_response, redis_client
+from .cache import get_cached_response, set_cached_response
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s') 
 import json

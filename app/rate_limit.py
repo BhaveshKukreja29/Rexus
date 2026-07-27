@@ -1,10 +1,7 @@
-import redis.asyncio as redis
 import time
 import uuid
 from fastapi import HTTPException
-from .config import REDIS_URL, MAX_REQUESTS_PER_MINUTE, WINDOW_SECONDS
-
-redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+from .config import WINDOW_SECONDS, redis_client
 
 # This rate limiter uses the Sliding Window algorithm implemented with a Redis Sorted Set.
 #
