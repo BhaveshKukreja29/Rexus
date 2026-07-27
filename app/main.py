@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, status, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import AsyncClient, ConnectError, ReadTimeout
+from collections.abc import AsyncGenerator
 from .config import API_TARGETS, WINDOW_SECONDS, MAX_REQUEST_SIZE, redis_client
 from .rate_limit import rate_limit
 from .cache import get_cached_response, set_cached_response
@@ -37,13 +38,16 @@ manager = ConnectionManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    client = AsyncClient()
+    app.state.client = client
     log_task = asyncio.create_task(batch_log_writer())
     yield
-    log_task.cancel()
+    _ = log_task.cancel()
     try:
         await log_task
     except asyncio.CancelledError:
         logging.info("Log writer task cancelled.")
+    await client.aclose()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -69,6 +73,8 @@ def get_target_url(api_name: str) -> str:
         raise HTTPException(status_code=400, detail="Invalid API name provided.")
     return target_url
 
+async def get_http() -> AsyncGenerator[AsyncClient, None]:
+    yield app.state.client
 
 @app.api_route('/proxy/{api_name}/{path:path}', methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_request(
@@ -76,7 +82,8 @@ async def proxy_request(
     path: str, 
     request: Request,
     api_key: APIKey = Depends(authenticate_api_key)
-):
+    client: AsyncClient = Depends(get_http)
+): 
     try:
         current_requests, timestamp = await rate_limit(
             key_id=api_key.public_id, 
@@ -118,76 +125,75 @@ async def proxy_request(
         if request_size > MAX_REQUEST_SIZE:
             raise HTTPException(status_code=413, detail="Payload Too Large")
 
-        async with AsyncClient() as client:
-            # remove the client's 'host' header, as it's specific to the incoming connection
-            # we don't want the actual api to recieve "localhost:8000", it will think something's wrong
-            # also, header keys are lowercased by the ASGI server, so we just use 'host'
-            request_headers = dict(request.headers)
-            request_headers.pop("host", None)
+        # remove the client's 'host' header, as it's specific to the incoming connection
+        # we don't want the actual api to recieve "localhost:8000", it will think something's wrong
+        # also, header keys are lowercased by the ASGI server, so we just use 'host'
+        request_headers = dict(request.headers)
+        request_headers.pop("host", None)
 
-            base_url = get_target_url(api_name)  
-            target_url = f"{base_url}/{path}"
+        base_url = get_target_url(api_name)  
+        target_url = f"{base_url}/{path}"
 
-            try:
-                response = await client.request(
-                    method=request.method, 
-                    url=target_url, 
-                    headers=request_headers, 
-                    params=request.query_params,
-                    content=body
-                )
-            except (ConnectError, ReadTimeout):
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail="The upstream API is unavailable."
-                )
-            
-            log_entry = {
-                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                "http_method": request.method,
-                "request_path": path,
-                "status_code": response.status_code,
-                "user_id": api_key.user_id,
-            }
-            log_entry_json = json.dumps(log_entry)
-            await redis_client.lpush("api_log_buffer", log_entry_json)
-            await manager.broadcast(log_entry_json)
-
-
-            # remove hop-by-hop headers from the target's response
-            # this allows our server to generate correct headers for the client
-            response_headers = dict(response.headers)
-            response_headers.pop("content-encoding", None)
-            response_headers.pop("content-length", None)
-            response_headers.pop("transfer-encoding", None)
-            response_headers.pop("connection", None)
-
-
-            # I learned that X means experimental header, which are different from the standard ones
-            # Although it was depreceated in 2012, it's still widely used
-            response_headers.pop("x-ratelimit-limit", None)
-            response_headers.pop("x-ratelimit-remaining", None)
-            response_headers.pop("x-ratelimit-reset", None)
-            
-            # Add our fresh rate limit headers
-            response_headers.update(fresh_rate_limit_headers)
-
-            logging.info(f"Proxying request: {request.method} {target_url} - Status: {response.status_code}")
-
-            if request.method == "GET" and response.status_code == 200:
-                # Cache the original response from the upstream API, not our modified one
-                response_dict = {
-                    "content": response.json(), 
-                    "status_code": response.status_code, 
-                    "headers": dict(response.headers) 
-                }
-                await set_cached_response(cache_key, response_dict)
-
-            return Response(
-                content=response.content, 
-                status_code=response.status_code, 
-                headers=response_headers
+        try:
+            response = await client.request(
+                method=request.method, 
+                url=target_url, 
+                headers=request_headers, 
+                params=request.query_params,
+                content=body
             )
+        except (ConnectError, ReadTimeout):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="The upstream API is unavailable."
+            )
+        
+        log_entry = {
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "http_method": request.method,
+            "request_path": path,
+            "status_code": response.status_code,
+            "user_id": api_key.user_id,
+        }
+        log_entry_json = json.dumps(log_entry)
+        await redis_client.lpush("api_log_buffer", log_entry_json)
+        await manager.broadcast(log_entry_json)
+
+
+        # remove hop-by-hop headers from the target's response
+        # this allows our server to generate correct headers for the client
+        response_headers = dict(response.headers)
+        response_headers.pop("content-encoding", None)
+        response_headers.pop("content-length", None)
+        response_headers.pop("transfer-encoding", None)
+        response_headers.pop("connection", None)
+
+
+        # I learned that X means experimental header, which are different from the standard ones
+        # Although it was depreceated in 2012, it's still widely used
+        response_headers.pop("x-ratelimit-limit", None)
+        response_headers.pop("x-ratelimit-remaining", None)
+        response_headers.pop("x-ratelimit-reset", None)
+        
+        # Add our fresh rate limit headers
+        response_headers.update(fresh_rate_limit_headers)
+
+        logging.info(f"Proxying request: {request.method} {target_url} - Status: {response.status_code}")
+
+        if request.method == "GET" and response.status_code == 200:
+            # Cache the original response from the upstream API, not our modified one
+            response_dict = {
+                "content": response.json(), 
+                "status_code": response.status_code, 
+                "headers": dict(response.headers) 
+            }
+            await set_cached_response(cache_key, response_dict)
+
+        return Response(
+            content=response.content, 
+            status_code=response.status_code, 
+            headers=response_headers
+        )
 
     except HTTPException as e:
         if e.status_code == 429:
