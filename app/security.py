@@ -1,5 +1,5 @@
 import secrets
-import bcrypt
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Tuple
 
@@ -7,15 +7,22 @@ from fastapi import HTTPException, Depends, Header, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import APIKey
+from app.config import CACHE_EXPIRY_SECONDS, MAX_REQUESTS_PER_MINUTE, redis_client
 from app.database import get_db
+from app.models import APIKey
+from app.schemas import AuthenticatedAPIKey
 
 def hash_secret(secret: str) -> str:
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(secret.encode('utf-8'), salt).decode('utf-8')
+    # salt = bcrypt.gensalt()
+    # return bcrypt.hashpw(secret.encode('utf-8'), salt).decode('utf-8')
+    return hashlib.sha256(secret.encode('utf-8')).hexdigest()    
 
 def verify_secret(plain_secret: str, hashed_secret: str) -> bool:
-    return bcrypt.checkpw(plain_secret.encode('utf-8'), hashed_secret.encode('utf-8'))
+    new_hash = hashlib.sha256(plain_secret.encode('utf-8')).hexdigest()
+    
+    if new_hash == hashed_secret:
+        return True
+    return False
 
 
 def generate_api_key() -> Tuple[str, str, str]:
@@ -27,7 +34,7 @@ def generate_api_key() -> Tuple[str, str, str]:
 async def create_api_key(
     db: AsyncSession,
     user_id: str,
-    requests_per_minute: int = 100,
+    requests_per_minute: int = MAX_REQUESTS_PER_MINUTE,
     expires_days: int = 30
 ) -> str:
     full_key, public_id, secret = generate_api_key()
@@ -52,7 +59,7 @@ async def create_api_key(
 async def authenticate_api_key(
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
-) -> APIKey:
+) -> AuthenticatedAPIKey:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid authorization header")
 
@@ -63,17 +70,29 @@ async def authenticate_api_key(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key format")
 
-    query = select(APIKey).where(APIKey.public_id == public_id)
-    result = await db.execute(query)
-    db_key = result.scalars().one_or_none()
+    # if redis entry exists, use it, otherwise query the database
+    json_key = await redis_client.get(public_id)
 
-    if not db_key or not db_key.is_active:
+    if json_key:
+        key = AuthenticatedAPIKey.model_validate_json(json_key)
+    else:
+        query = select(APIKey).where(APIKey.public_id == public_id)
+        result = await db.execute(query)
+        db_key = result.scalars().one_or_none()
+
+        if not db_key:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+        key = AuthenticatedAPIKey.model_validate(db_key)
+        await redis_client.setex(public_id, CACHE_EXPIRY_SECONDS, key.model_dump_json())
+    
+    if not key.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
-    if db_key.expires_at and db_key.expires_at < datetime.now(timezone.utc):
+    if key.expires_at and key.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key has expired")
-
-    if not verify_secret(plain_secret, db_key.hashed_secret):
+        
+    if not verify_secret(plain_secret, key.hashed_secret):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
-    return db_key
+    return key
